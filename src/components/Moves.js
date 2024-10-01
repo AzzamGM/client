@@ -9,7 +9,7 @@ const Moves = ({ onLockIn }) => {
   const columnGrids = useRef([]);
   const availableMovesGrid = useRef(null);
   const nextMovesGrid = useRef(null);
-  const availableMoves = useRef(['Forward', 'Turn', 'Attack', 'Jump', 'Climb']);
+  const availableMoves = useRef(['Forward', 'Forward', 'Attack', 'Turn', 'Climb']);
   const nextMoves = useRef([]);
   const MAX_NEXT_MOVES = 3;
   const isMaxRef = useRef(false);
@@ -86,13 +86,13 @@ const Moves = ({ onLockIn }) => {
   };
 
   return (
-    <div className="flex flex-col w-96 mt-3">
+    <div className="flex flex-col w-48 mt-3"> {/* Changed from w-96 to w-48 */}
       <div className='flex flex-row'>
         <div ref={dragContainerRef} className="drag-container"></div>
         <div className="board flex-1">
           <div className={`board-column available-moves ${isMaxRef.current ? 'pointer-events-none opacity-50' : ''}`}>
             <div className="board-column-container">
-              <div className="board-column-header bg-green-500">Available</div>
+              <div className="board-column-header bg-green-500">Moves</div>
               <div className="board-column-content-wrapper">
                 <div className="board-column-content">
                   {availableMoves.current.map((move, i) => (
@@ -119,11 +119,11 @@ const Moves = ({ onLockIn }) => {
         </div>
         <div ref={dragContainerRef} className="drag-container"></div>
       </div>
-
-      <div className="flex flex-col p-3 justify-center items-center">
+  
+      <div className="flex flex-col p-2 justify-center items-center"> {/* Reduced padding */}
         <button 
-          className={`m-6 mt-0 font-bold rounded-2xl p-2 ${isMaxRef.current ? '' : 'pointer-events-none opacity-50'}`}
-          style={{ backgroundColor: 'rgb(42 18 149)', color: 'white', width: '200px' }}
+          className={`m-4 mt-0 font-bold rounded-2xl p-1 ${isMaxRef.current ? '' : 'pointer-events-none opacity-50'}`} // Adjusted padding
+          style={{ backgroundColor: 'rgb(42 18 149)', color: 'white', width: '100px' }} // Adjusted width
           onClick={handleLockIn}
         >
           Lock In
@@ -131,6 +131,7 @@ const Moves = ({ onLockIn }) => {
       </div>
     </div>
   );
+  
 };
 
 export default Moves;

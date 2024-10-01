@@ -39,16 +39,16 @@ function Lobby({ roomId, nickname }) {
 
     const startGame = () => {
         console.log("Game is starting...");
-        if (spawnPlayers) {
-            spawnPlayers(playerCount); // Call SpawnPlayers with playerCount
-        }
+        spawnPlayers(playerCount); // Call SpawnPlayers with playerCount
         setGameStarted(true);
     };
+
+
     socket.on(startGame)
     return (
-        <div className='flex flex-col justify-center' style={{ padding: '20px', backgroundColor: '#421ced', width: '100vw', height: '100vh', zIndex: 9000}}>
-            <div className="flex flex-col justify-start place-items-center" style={{ padding: '20px', backgroundColor: '#421ced' }}>
-                <div className='absolute top-0 m-6 mt-2 font-bold rounded-2xl p-4 flex justify-center bg-blue-900 text-white'>
+        <div className='flex flex-col justify-start' style={{ padding: '20px', backgroundColor: '#421ced', width: '100vw', height: '100vh'}}>
+            <div className="flex flex-col justify-start place-items-center" style={{ padding: '20px', backgroundColor: '#421ced',zIndex: '9000', opacity: '40%' }}>
+                <div className='absolute top-0 m-6 mt-2 font-bold rounded-2xl p-4 flex justify-center bg-blue-900 text-white unselectable'>
                     <h2>Welcome, {nickname}! You are in room "{roomId}".</h2>
                 </div>
             </div>
