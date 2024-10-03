@@ -3,8 +3,11 @@ import socket from '../socketService'; // Import your socket service
 import Shoot from '../assets/CowBoyDraw.gif'
 import Idle from '../assets/CowBoyIdle.gif'
 import Walk from '../assets/CowBoyWalk.gif'
+import Jump from '../assets/CowBoyJump.gif'
+import Wounded from '../assets/CowBoyWounded.gif'
 import Train from '../assets/train.png'
 import Train2 from '../assets/train2.png'
+import Train3 from '../assets/train3.png'
 function GameLogic({ setSpawnPlayers }) {
     const [gameStarted, setGameStarted] = useState(false);
     const [roundStarted, setRoundStarted] = useState(false);
@@ -21,8 +24,11 @@ function GameLogic({ setSpawnPlayers }) {
     const CharShoot = Shoot
     const CharIdle = Idle
     const CharWalk = Walk
+    const CharJump = Jump
+    const CharWounded = Wounded
     const platform1 = Train
     const platform2 = Train2
+    const platform3 = Train3
 
 
   useEffect(() => {
@@ -102,7 +108,7 @@ function GameLogic({ setSpawnPlayers }) {
                         }
     
                         // Delay between iterations
-                        await delay(2000); // Delay of 500 milliseconds (adjust as needed)
+                        await delay(2500); // Delay of 500 milliseconds (adjust as needed)
                     }
                 }
     
@@ -157,78 +163,167 @@ function GameLogic({ setSpawnPlayers }) {
         }
     }, []);
 
-    const moveElement = useCallback((playerID, newPlatform, Direction) => {
-
+    const moveElement = useCallback((playerID, newPlatform, Direction, type) => {
         const element = document.getElementById(playerID);
-        
         const targetDiv = document.getElementById('p' + newPlatform);
-        
+        const currentDiv = element.parentElement
+        const indexOfElement = Array.from(currentDiv.children).findIndex(child => child.id === String(playerID));
         if (!element || !targetDiv) {
             console.log('Element or targetDiv not found');
             return;
         }
-    
-        // Set the moving state to true
-        
         // Calculate the current position and the target position
         const rect = element.getBoundingClientRect();
         const targetRect = targetDiv.getBoundingClientRect();
-
-      
+        
         let minusWidth = element.getBoundingClientRect().width;
-
-        if (Direction==='L') {
-            minusWidth = element.getBoundingClientRect().width/2;
-        } else {
-            minusWidth = -element.getBoundingClientRect().width/2;
-        }
-        
-        
-        // Calculate the translate values to center the element in the target div
-        const ghost = document.createElement('div');
-        ghost.style.width = element.offsetWidth + 'px';
-        ghost.style.height = element.offsetHeight + 'px';
-        ghost.style.opacity = '0'; // Make it invisible
-
-        
     
-        // Determine where to place the ghost element
-        if (Direction === 'R') {
-            // Insert ghost before the first child (moving to the front)
-            targetDiv.insertBefore(ghost, targetDiv.firstChild);
+        if (Direction === 'L') {
+            minusWidth = element.getBoundingClientRect().width / 2;
         } else {
-            // Append ghost as the last child (moving to the back)
-            targetDiv.appendChild(ghost);
+            minusWidth = -element.getBoundingClientRect().width / 2;
         }
 
+        // Shift all current child divs to the left or right
+
+        const currnetChildDivs = currentDiv.querySelectorAll('img');
+        currnetChildDivs.forEach((child, childIndex) => {
+            const currentChildTransform = window.getComputedStyle(child).transform;
+            console.log(indexOfElement, childIndex)
+            if(childIndex !== indexOfElement) {       
+
+            
+            let shiftDirection = 1 // if index of tyhis child
+            setTimeout(() => {
+
+                if (childIndex > indexOfElement) {
+                    // Apply a different transformation or effect if the indices match
+                    shiftDirection = -1
+                } else {
+                    shiftDirection = 1
+                }
+
+                let scaleX = 1; // Default to positive scale
+                if (currentChildTransform && currentChildTransform.startsWith('matrix')) {
+                    const matrixValues = currentChildTransform.match(/matrix\(([^)]+)\)/)[1].split(', ').map(Number);
+                    scaleX = matrixValues[0]; // First value is scaleX
+                }
+
+
+
+                // Calculate the adjustment based on the scale
+                //(scaleX < 0 ? 1 : -1)
+                const adjustment = (scaleX < 0 ? 1 : 1) * Math.abs(minusWidth) * shiftDirection;
+                
+                console.log(`adjustment: ${adjustment}, for child ${childIndex}, ${child.id}`);
+                // Apply the translateX transformation
+                child.style.transform = `translateX(${adjustment}px) ${currentChildTransform} `;
+                child.style.transition = `all 0.2s linear`; 
+                child.src = CharWalk;
+            }, 200);
+            setTimeout(() => {
+                child.src = CharIdle;
+            }, 400);
+            setTimeout(() => {
+                let scaleX = 1; // Default to positive scale
+                if (currentChildTransform && currentChildTransform.startsWith('matrix')) {
+                    const matrixValues = currentChildTransform.match(/matrix\(([^)]+)\)/)[1].split(', ').map(Number);
+                    scaleX = matrixValues[0]; // First value is scaleX
+                }
+                child.style.transform = `scaleX(${scaleX})`; 
+                child.style.transition = ``;
+            }, 1500);
+        }
+        else{
+            return
+        }
+        })
+
+
+
+
+
+
+
+
+
+
+        // Shift all target child divs to the left or right
+        const childDivs = targetDiv.querySelectorAll('img');
+        childDivs.forEach(child => {
+            const currentChildTransform = window.getComputedStyle(child).transform;
+            setTimeout(() => {
+            // Extract scaleX from the current transform if it's in matrix form
+            let scaleX = 1; // Default to positive scale
+            if (currentChildTransform && currentChildTransform.startsWith('matrix')) {
+                const matrixValues = currentChildTransform.match(/matrix\(([^)]+)\)/)[1].split(', ').map(Number);
+                scaleX = matrixValues[0]; // First value is scaleX
+            }
+    
+            // Calculate the adjustment based on the scale
+            const adjustment = (scaleX < 0 ? 1 : -1) * minusWidth;
+    
+            // Apply the translateX transformation
+            child.style.transform = `${currentChildTransform} translateX(${adjustment}px)`;
+            child.style.transition = `all 0.2s linear`; 
+    
+            child.src = CharWalk;
+            }, 200);
+            // Reset image after a brief period
+            setTimeout(() => {          
+                child.src = CharIdle;
+            }, 400);
+    
+            // Reset the transform after a delay
+            setTimeout(() => {
+                let scaleX = 1; // Default to positive scale
+                if (currentChildTransform && currentChildTransform.startsWith('matrix')) {
+                    const matrixValues = currentChildTransform.match(/matrix\(([^)]+)\)/)[1].split(', ').map(Number);
+                    scaleX = matrixValues[0]; // First value is scaleX
+                }
+                child.style.transform = `scaleX(${scaleX})`; 
+                child.style.transition = ``;
+
+            }, 1500); // Match with the transition duration
+        });
+    
+
+
+
+
+
+        // Calculate translate values
         const translateX = (targetRect.left + targetRect.width / 2) - (rect.left + rect.width / 2);
         const translateY = targetRect.bottom - rect.bottom; // Keep vertical position unchanged
     
-        // Set the initial position of the element with both translation and scale
-        const scale = element.style.transform;
-        element.style.transition = 'all 1s ease'; // Ensure the transition is smooth
-
-        if (targetDiv.childNodes.length > 1) {
-            element.style.transform = `translate(${translateX+(minusWidth*(targetDiv.childNodes.length-1))}px, ${translateY}px) ${scale}`;
+        // Get the current transform for the player element
+        const currentScale = element.style.transform;
+    
+        element.style.transition = (type === 'Forward') ? 'all 1.5s linear' : 'all 1s ease';
+    
+        // Set the new transform, keeping the scaleX intact
+        if (targetDiv.childNodes.length > 0) {
+            element.style.transform = `translate(${translateX + (minusWidth * (targetDiv.childNodes.length))}px, ${translateY}px) ${currentScale}`;
+        } else {
+            element.style.transform = `translate(${translateX}px, ${translateY}px) ${currentScale}`;
         }
-        else{
-            element.style.transform = `translate(${translateX}px, ${translateY}px) ${scale}`;
-        }
-        element.src = CharWalk;
+    
+        type === 'Forward' ? element.src = CharWalk : element.src = CharWounded;
     
         // After a delay, append the element to the new platform
         setTimeout(() => {
-            targetDiv.removeChild(ghost);
-            if (Direction==='R') {
-                targetDiv.insertBefore(element, targetDiv.firstChild);
-            } else {
-                targetDiv.appendChild(element);
+            Direction === 'R' ? targetDiv.insertBefore(element, targetDiv.firstChild) : targetDiv.appendChild(element);
+            
+            // Maintain the existing scale transformation
+            element.style.transform = currentScale; // Keep the scale transformation
+            element.style.transition = ``; // Reset the transition
+            if (type === 'Forward') {
+                element.src = CharIdle;
             }
-            // After moving, reset the transform to just the scale to maintain direction
-            element.style.transform = scale; // Keep the scale transformation
-            element.src = CharIdle;
-        }, 1000); // Match the duration with CSS transition
+        }, 1500); // Match the duration with CSS transition
     }, []);
+    
+    
     
     const turnPlayer = useCallback((playerID) => {
         const currentLocalDirections = localDirectionsRef.current;
@@ -261,16 +356,14 @@ function GameLogic({ setSpawnPlayers }) {
         const scale = element.style.transform;
         const transition = element.style.transition;
 
-        element.style.transition = 'all 0.05s ease'; 
+        element.style.transition = 'all 0.05s linear'; 
+  
+        scale === 'scaleX(-1)' ? element.style.transform = 'scaleX(1)' :  element.style.transform = 'scaleX(-1)';
 
-        if (scale === 'scaleX(-1)') {  
-            element.style.transform = 'scaleX(1)';
-        } else {
-            element.style.transform = 'scaleX(-1)';
-        }
         // Reset the transition immediately after the flip
         setTimeout(() => {
-            element.style.transition = transition
+            element.style.transition = `transition`
+            console.log(element.style.transform);
         }, 1000);
     }, []);
     
@@ -285,11 +378,11 @@ const movePlayer = useCallback((Platforms, playerId, direction) => {
             const index = updatedPlatforms[i].indexOf(playerId);
             const value = updatedPlatforms[i].splice(index, 1)[0]; // Remove playerId
             if (direction === 'L' && i > 0) {
-                moveElement(playerId, i - 1, direction);
+                moveElement(playerId, i - 1, direction, 'Forward');
                 updatedPlatforms[i - 1].push(value); // Move left
                 console.log(`${playerId} moved L (${i} to ${i - 1})`);
             } else if (direction === 'R' && i < updatedPlatforms.length - 1) {
-                moveElement(playerId, i + 1, direction);
+                moveElement(playerId, i + 1, direction, 'Forward');
                 updatedPlatforms[i + 1].unshift(value); // Move right
                 console.log(`${playerId} moved R (${i} to ${i + 1})`);
             } else {
@@ -313,11 +406,11 @@ const knockbackPlayer = useCallback((Platforms, playerId, Direction) => {
             const index = updatedPlatforms[i].indexOf(playerId);
             const value = updatedPlatforms[i].splice(index, 1)[0]; // Remove playerId
             if (Direction === 'L' && i > 0) {
-                moveElement(playerId, i - 1, Direction);
+                moveElement(playerId, i - 1, Direction, 'Back');
                 updatedPlatforms[i - 1].push(value); // Move left
                 console.log(`${playerId} was shot L (${i} to ${i - 1})`);
             } else if (Direction === 'R' && i < updatedPlatforms.length - 1) {
-                moveElement(playerId, i + 1, Direction);
+                moveElement(playerId, i + 1, Direction, 'Back');
                 updatedPlatforms[i + 1].unshift(value); // Move right
                 console.log(`${playerId} was shot R (${i} to ${i + 1})`);
             }
@@ -328,33 +421,6 @@ const knockbackPlayer = useCallback((Platforms, playerId, Direction) => {
 }, 950);
 }, []);
 
-    function pushPlayer(Platforms, playerId, direction) {
-        const updatedPlatforms = Platforms.map(platform => [...platform]);
-        for (let i = 0; i < Platforms.length; i++) {
-            const innerArray = Platforms[i];
-            if (innerArray.includes(playerId)) {
-                const index = innerArray.indexOf(playerId);
-                const value = innerArray.splice(index, 1)[0];
-                if (direction === 'L') {
-                    if (i > 0) {
-                        Platforms[i - 1].unshift(value);
-                    } else {
-                        Platforms[0].unshift(value); // Push to the first array
-                    }
-                } else if (direction === 'R') {
-                    if (i < Platforms.length - 1) {
-                        Platforms[i + 1].push(value);
-                    } else {
-                        console.log(' dead');
-                    }
-                }
-                break;
-            }
-        }
-        localSpawnsRef.current = updatedPlatforms
-        console.log(localSpawnsRef.current)
-    }
-    
     
     function findNearestPlayer(playerID) {
         const currentLocalSpawns = localSpawnsRef.current;
@@ -438,7 +504,24 @@ const knockbackPlayer = useCallback((Platforms, playerId, Direction) => {
     <div className='flex flex-row place-items-end justify-center items-stretch top-0'
     style={{width: '100vw'}}>
         {/* Creating multiple divs */}
-        {localSpawns.map((spawn, index) => {
+        {localSpawns.map((spawn, index) => {   let rndtrain;
+        let rndplatform;
+        const platformIndex = index % 3 + 1; 
+        switch (platformIndex) {
+            case 1:
+                rndplatform = platform1;
+                break;
+            case 2:
+                rndplatform = platform2;
+                break;
+            case 3:
+                rndplatform = platform3;
+                break;
+            default:
+                rndplatform = platform1;
+                break
+        }
+
             if (spawn > 0) {
                 const keys = Object.keys(localDirections);
                 const direction = localDirections[keys[index - 1]];
@@ -449,11 +532,10 @@ const knockbackPlayer = useCallback((Platforms, playerId, Direction) => {
                     const PlayerID = direction[0];
                     return (
                         <div key={index} id={'p'+index} className={`grow flex place-items-end justify-center character`}
-                        style={{backgroundImage: `url(${platform2})`, 
+                        style={{backgroundImage: `url(${rndplatform})`, 
                         backgroundSize: 'contain',
                         backgroundPosition: 'center bottom',
                         imageRendering: 'pixelated',
-                        transition: 'all 0.3s ease',
                         ...style
                         }}>
                             <img 
@@ -466,7 +548,7 @@ const knockbackPlayer = useCallback((Platforms, playerId, Direction) => {
                                     objectFit: 'contain',
                                     imageRendering: 'pixelated',
                                     transform: FacingLeft ? 'scaleX(-1)' : 'scaleX(1)',
-                                    filter: PlayerID===1 ? `hue-rotate(0deg)` : `hue-rotate(${PlayerID*90}deg)`,
+                                    //filter: PlayerID===1 ? `hue-rotate(0deg)` : `hue-rotate(${PlayerID*90}deg)`,
                                 }} 
                                 className={`place-self-end character`}
                                 //className={`place-self-end ${isMoving ? 'moving' : ''}`}
@@ -477,7 +559,7 @@ const knockbackPlayer = useCallback((Platforms, playerId, Direction) => {
             } else {         
                 return (
                     <div key={index} id={'p'+index} className={`grow flex place-items-end justify-center unselectable`}
-                    style={{backgroundImage: `url(${platform1})`, 
+                    style={{backgroundImage: `url(${rndplatform})`, 
                     backgroundSize: 'contain',
                     backgroundPosition: 'center bottom',
                     imageRendering: 'pixelated',

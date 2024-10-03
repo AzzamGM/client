@@ -128,9 +128,8 @@ html, body {
   user-select: none;
   -webkit-user-drag: none; /* Prevent dragging in WebKit browsers */
   pointer-events: none; /* Optional: Prevent mouse events */
+  
 }
-.character{
-  transition: all 0.3s ease;
-}
+
 
 
