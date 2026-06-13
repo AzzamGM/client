@@ -3,17 +3,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import Muuri from 'muuri';
 import './style.css'; // Ensure this file is correctly linked
 import socket from '../socketService'; // Import the socket instance
+import HowToPlayButton from './HowToPlay';
 
-const Moves = ({ onLockIn }) => {
+const Moves = ({ onLockIn, disabled }) => {
   const dragContainerRef = useRef(null);
   const columnGrids = useRef([]);
-  const availableMovesGrid = useRef(null);
   const nextMovesGrid = useRef(null);
-  const availableMoves = useRef(['Forward', 'Forward', 'Attack', 'Turn', 'Climb']);
-  const nextMoves = useRef([]);
+  const availableMoves = useRef(['Forward', 'Standoff', 'Shoot', 'Turn', 'Climb']);
   const MAX_NEXT_MOVES = 3;
   const isMaxRef = useRef(false);
-  const currentNextMoves = useRef(MAX_NEXT_MOVES); 
+  const currentNextMoves = useRef(MAX_NEXT_MOVES);
   const [, forceUpdate] = useState();
 
 
@@ -58,9 +57,7 @@ const Moves = ({ onLockIn }) => {
         forceUpdate((s) => !s);
       });
 
-      if (index === 0) {
-        availableMovesGrid.current = grid;
-      } else {
+      if (index !== 0) {
         nextMovesGrid.current = grid;
       }
       columnGrids.current.push(grid);
@@ -77,22 +74,23 @@ const Moves = ({ onLockIn }) => {
   }, []);
 
   const handleLockIn = () => {
-    const nextColumnItems = nextMovesGrid.current.getItems().map(item => item.getElement().innerText);
-    nextMoves.current = nextColumnItems.slice(0, MAX_NEXT_MOVES);
-    onLockIn(nextMoves.current);
-  
+    const nextMoves = nextMovesGrid.current.getItems()
+      .map(item => item.getElement().innerText)
+      .slice(0, MAX_NEXT_MOVES);
+    onLockIn(nextMoves);
+
     // Emit the moves to the server
-    socket.emit('lockInMoves', nextMoves.current);
+    socket.emit('lockInMoves', nextMoves);
   };
 
   return (
-    <div className="flex flex-col w-48 mt-3"> {/* Changed from w-96 to w-48 */}
+    <div className="flex flex-col w-72 mt-3">
       <div className='flex flex-row'>
         <div ref={dragContainerRef} className="drag-container"></div>
         <div className="board flex-1">
           <div className={`board-column available-moves ${isMaxRef.current ? 'pointer-events-none opacity-50' : ''}`}>
             <div className="board-column-container">
-              <div className="board-column-header bg-green-500">Moves</div>
+              <div className="board-column-header" style={{ backgroundColor: 'var(--success)' }}>Moves</div>
               <div className="board-column-content-wrapper">
                 <div className="board-column-content">
                   {availableMoves.current.map((move, i) => (
@@ -110,7 +108,7 @@ const Moves = ({ onLockIn }) => {
         <div className="board flex-1">
           <div className="board-column next-moves">
             <div className="board-column-container">
-              <div className={`board-column-header ${isMaxRef.current ? 'bg-red-600' : 'bg-yellow-400'}`}>Next ({currentNextMoves.current})</div>
+              <div className="board-column-header" style={{ backgroundColor: isMaxRef.current ? 'var(--danger)' : 'var(--accent)', color: isMaxRef.current ? 'var(--text-light)' : 'var(--accent-text)' }}>Next ({currentNextMoves.current})</div>
               <div className="board-column-content-wrapper">
                 <div className="board-column-content"></div>
               </div>
@@ -122,12 +120,13 @@ const Moves = ({ onLockIn }) => {
   
       <div className="flex flex-col p-2 justify-center items-center"> {/* Reduced padding */}
         <button 
-          className={`m-4 mt-0 font-bold rounded-2xl p-1 ${isMaxRef.current ? '' : 'pointer-events-none opacity-50'}`} // Adjusted padding
-          style={{ backgroundColor: 'rgb(42 18 149)', color: 'white', width: '100px' }} // Adjusted width
+          className={`m-4 mt-0 font-bold rounded-2xl p-1 btn-3d btn-3d-header ${disabled ? 'btn-3d-pressed' : ''} ${isMaxRef.current ? '' : 'pointer-events-none opacity-50'}`} // Adjusted padding
+          style={{ backgroundColor: 'var(--header)', color: 'var(--text-light)', width: '100px' }} // Adjusted width
           onClick={handleLockIn}
         >
           Lock In
         </button>
+        <HowToPlayButton compact />
       </div>
     </div>
   );

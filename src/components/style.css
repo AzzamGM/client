@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Special+Elite&display=swap');
+
 * {
   box-sizing: border-box;
 }
@@ -5,8 +7,547 @@ html, body {
   position: relative;
   width: 100%;
   height: 100%;
-  font-family: Helvetica, Arial, sans-serif;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  /* Characters knocked/walking off the train translate ~500px past the
+     viewport edge; don't let that stretch the page sideways */
+  overflow-x: hidden;
 }
+button, input, select, textarea {
+  font-family: inherit;
+}
+/* Special Elite renders a touch high on the line; nudge text-bearing
+   elements down so labels look vertically centered. (Not applied via *
+   because Muuri items and the character sprites manage their own
+   transforms.) */
+button, input, select, textarea, h1, h2, h3, h4, h5, h6, p, label, span {
+  transform: translateY(2px);
+}
+
+/* ---- Wild West themes ---- */
+:root {
+  /* Card outline: dark ink derived from the theme's header color (same
+     recipe as the 3D button shadows) */
+  --card-border: 2px solid color-mix(in srgb, var(--header) 55%, black);
+
+  /* Scaled-down version of the page's plank pattern for small surfaces
+     (headers, pills, toggles): narrow planks with thin seams plus the
+     top-lit sheen, composited over any background color */
+  --wood-planks-small:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.03) 30%, rgba(0, 0, 0, 0.05) 60%, rgba(0, 0, 0, 0.22) 100%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 4px,
+      rgba(0, 0, 0, 0.05) 4px,
+      rgba(0, 0, 0, 0) 5px,
+      rgba(0, 0, 0, 0) 9px,
+      rgba(255, 255, 255, 0.04) 9px,
+      rgba(0, 0, 0, 0) 10px,
+      rgba(0, 0, 0, 0) 13px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.28) 0px,
+      rgba(0, 0, 0, 0.28) 1px,
+      rgba(255, 255, 255, 0.06) 1px,
+      rgba(255, 255, 255, 0.06) 2px,
+      rgba(0, 0, 0, 0) 2px,
+      rgba(0, 0, 0, 0.04) 24px,
+      rgba(0, 0, 0, 0.28) 24px,
+      rgba(0, 0, 0, 0.28) 25px,
+      rgba(255, 255, 255, 0.05) 25px,
+      rgba(255, 255, 255, 0.05) 26px,
+      rgba(0, 0, 0, 0.06) 26px,
+      rgba(0, 0, 0, 0.02) 50px
+    );
+
+  /* Repeatable wall-of-planks pattern for the page background. Built from
+     translucent overlays so it tints the theme's --bg: a soft top light,
+     two out-of-phase grain streak layers (different periods so the tiling
+     isn't obvious), and alternating plank shades split by dark seams with
+     a thin bevel highlight */
+  --wood-planks:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0.12) 100%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 5px,
+      rgba(0, 0, 0, 0.04) 5px,
+      rgba(0, 0, 0, 0) 6px,
+      rgba(0, 0, 0, 0) 11px,
+      rgba(255, 255, 255, 0.03) 11px,
+      rgba(0, 0, 0, 0) 12px,
+      rgba(0, 0, 0, 0) 17px,
+      rgba(0, 0, 0, 0.05) 17px,
+      rgba(0, 0, 0, 0) 18px,
+      rgba(0, 0, 0, 0) 23px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0) 0px,
+      rgba(0, 0, 0, 0) 8px,
+      rgba(0, 0, 0, 0.03) 8px,
+      rgba(0, 0, 0, 0) 10px,
+      rgba(0, 0, 0, 0) 31px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.25) 0px,
+      rgba(0, 0, 0, 0.25) 2px,
+      rgba(255, 255, 255, 0.05) 2px,
+      rgba(255, 255, 255, 0.05) 4px,
+      rgba(255, 255, 255, 0.02) 4px,
+      rgba(0, 0, 0, 0) 70px,
+      rgba(0, 0, 0, 0.05) 118px,
+      rgba(0, 0, 0, 0.25) 118px,
+      rgba(0, 0, 0, 0.25) 120px,
+      rgba(255, 255, 255, 0.04) 120px,
+      rgba(255, 255, 255, 0.04) 122px,
+      rgba(0, 0, 0, 0.07) 122px,
+      rgba(0, 0, 0, 0.02) 180px,
+      rgba(0, 0, 0, 0.09) 236px
+    );
+}
+
+:root,
+.theme-saloon {
+  --bg: #7b5c49;            /* dark wood */
+  --header: #6b3f23;        /* saddle brown */
+  --accent: #c9962e;        /* brass */
+  --accent-text: #2e1d0e;
+  --panel: #f3e7c9;         /* parchment */
+  --item: #fdf6e3;
+  --item-hover: #efe3c4;
+  --text-light: #f5ecd7;
+  --danger: #9c2b1f;        /* oxblood */
+  --success: #557a3c;
+  --muted: #9b8a72;
+  --highlight: rgba(201, 150, 46, 0.25);
+  --avatar-bg: #e6d9bd;
+}
+.theme-sunset {
+  --bg: #d9742b;            /* sunset orange */
+  --header: #a8472a;        /* terracotta */
+  --accent: #c1442e;        /* dusty red */
+  --accent-text: #fff4e3;
+  --panel: #f6e8c8;         /* sand */
+  --item: #fdf3dd;
+  --item-hover: #f1e2c0;
+  --text-light: #fff4e3;
+  --danger: #8f2415;
+  --success: #4f7a35;
+  --muted: #a08a6c;
+  --highlight: rgba(168, 71, 42, 0.18);
+  --avatar-bg: #ecd9b3;
+}
+.theme-midnight {
+  --bg: #1c2333;            /* night navy */
+  --header: #343d4f;        /* steel charcoal */
+  --accent: #e0a432;        /* lantern amber */
+  --accent-text: #221a08;
+  --panel: #e8e6e0;         /* smoke gray */
+  --item: #f7f5f0;
+  --item-hover: #e6e3da;
+  --text-light: #eef0f4;
+  --danger: #c03b2d;
+  --success: #4e7d46;
+  --muted: #8b8f99;
+  --highlight: rgba(224, 164, 50, 0.22);
+  --avatar-bg: #d2d0c9;
+}
+.theme-wanted {
+  --bg: #e8d9b0;            /* aged parchment */
+  --header: #3d2b1c;        /* ink brown */
+  --accent: #a32e22;        /* stamp red */
+  --accent-text: #f5ecd4;
+  --panel: #f5ecd4;
+  --item: #fbf4e0;
+  --item-hover: #eee2c6;
+  --text-light: #f5ecd4;
+  --danger: #a32e22;
+  --success: #5b6e35;
+  --muted: #97896c;
+  --highlight: rgba(163, 46, 34, 0.15);
+  --avatar-bg: #e2d3ab;
+}
+/* Chunky 3D push buttons: a solid shadow underneath that collapses on
+   click so the button looks physically pressed in */
+.btn-3d {
+  box-shadow: 0px 6px 0px 0 var(--btn-shadow);
+  transition: transform 0.06s ease, box-shadow 0.06s ease;
+}
+.btn-3d:active {
+  /* 8px press travel on top of the global 2px text nudge */
+  transform: translateY(10px);
+  box-shadow: 0px 0px 0px 0 var(--btn-shadow);
+}
+/* Hold the pressed-in look (e.g. Lock In stays down while the moves board
+   is locked) */
+.btn-3d.btn-3d-pressed {
+  transform: translateY(10px);
+  box-shadow: 0px 0px 0px 0 var(--btn-shadow);
+}
+/* Player-row icon buttons (rename / save / leave / kick): identical boxes
+   with centered content so glyphs and SVGs line up with each other */
+.row-icon-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Invalid form field: red ring and a quick shake to draw the eye */
+.input-error {
+  border: 2px solid var(--danger);
+  animation: input-shake 0.3s ease;
+}
+@keyframes input-shake {
+  /* keep the global translateY(2px) text nudge while wiggling */
+  0%, 100% { transform: translateY(2px) translateX(0); }
+  25% { transform: translateY(2px) translateX(-6px); }
+  75% { transform: translateY(2px) translateX(6px); }
+}
+
+.btn-3d-header { --btn-shadow: color-mix(in srgb, var(--header) 55%, black); }
+/* Fixed burnt-orange (How to Play) — same shade on every theme */
+.btn-3d-orange { --btn-shadow: color-mix(in srgb, #d97f2a 55%, black); }
+.btn-3d-accent { --btn-shadow: color-mix(in srgb, var(--accent) 55%, black); }
+.btn-3d-danger { --btn-shadow: color-mix(in srgb, var(--danger) 55%, black); }
+
+/* ---- "Final Standoff" cinematic (two players left) ---- */
+/* Non-blocking flourish: dusk vignette, a wanted-poster stamp slamming in,
+   the two finalists facing off, and a tumbleweed rolling through */
+.standoff-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9040; /* below the Victory overlay (9050) */
+  pointer-events: none;
+  overflow: hidden;
+  animation: standoff-fade 4.2s ease forwards;
+}
+@keyframes standoff-fade {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.standoff-vignette {
+  position: absolute;
+  inset: 0;
+  /* Solid dark wash so the banner pops, with even darker edges */
+  background:
+    radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0.55) 100%),
+    rgba(0, 0, 0, 0.6);
+}
+.standoff-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+.standoff-title {
+  font-size: clamp(32px, 8vw, 80px);
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--danger);
+  background: var(--panel);
+  padding: 8px 30px 2px;
+  border: 6px double var(--danger);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.15);
+  animation: standoff-stamp 0.5s cubic-bezier(0.2, 2, 0.4, 1) both;
+  animation-delay: 0.25s;
+}
+@keyframes standoff-stamp {
+  0% { transform: rotate(-15deg) scale(3.2); opacity: 0; }
+  60% { transform: rotate(-2deg) scale(0.94); opacity: 1; }
+  100% { transform: rotate(-4deg) scale(1); opacity: 1; }
+}
+.standoff-vs {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  animation: standoff-rise 0.6s ease both;
+  animation-delay: 0.8s;
+}
+@keyframes standoff-rise {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.standoff-duelist {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.standoff-name {
+  font-weight: bold;
+  color: var(--text-light);
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
+}
+.standoff-avatar {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  background: var(--avatar-bg);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+/* The duelists eye each other */
+.standoff-avatar-flip {
+  transform: scaleX(-1);
+}
+.standoff-vs-text {
+  font-size: clamp(22px, 4vw, 36px);
+  font-weight: bold;
+  color: var(--accent);
+  text-shadow: 0 0 14px var(--accent);
+  animation: standoff-vs-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes standoff-vs-pulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.3); }
+}
+.standoff-subtitle {
+  font-style: italic;
+  color: var(--text-light);
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
+  animation: standoff-rise 0.6s ease both;
+  animation-delay: 1.3s;
+}
+/* Turn-order chip in the player list (gold one goes first) */
+.turn-chip {
+  flex-shrink: 0;
+  margin-right: 6px;
+  padding: 1px 6px 0;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: bold;
+  background-color: var(--muted);
+  color: var(--text-light);
+}
+
+/* "Moves locked in, waiting for others" notice under the board */
+.waiting-msg {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  color: var(--text-light);
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6);
+  animation: waiting-pulse 1.6s ease-in-out infinite;
+}
+@keyframes waiting-pulse {
+  50% { opacity: 0.55; }
+}
+
+/* Live action pop-up at top-center: avatar + the move being played */
+.live-action-banner {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  z-index: 9020;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 18px 5px 6px;
+  border-radius: 999px;
+  background-color: var(--header);
+  background-image: var(--wood-planks-small);
+  color: var(--text-light);
+  font-weight: bold;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  animation: action-pop 0.25s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes action-pop {
+  from { transform: translate(-50%, -18px) scale(0.7); opacity: 0; }
+  to { transform: translate(-50%, 0) scale(1); opacity: 1; }
+}
+
+/* Connecting-to-lobby loading screen: spinning sheriff star */
+.loading-star {
+  font-size: 64px;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: 0 0 18px rgba(0, 0, 0, 0.5);
+  animation: star-spin 1.8s linear infinite;
+}
+@keyframes star-spin {
+  to { transform: rotate(360deg); }
+}
+.loading-text {
+  margin-top: 12px;
+  font-weight: bold;
+  color: var(--text-light);
+  animation: waiting-pulse 1.6s ease-in-out infinite;
+}
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9100;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.help-modal {
+  width: 440px;
+  max-width: 92vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+  border-radius: 5px;
+  animation: help-pop 0.2s ease both;
+}
+@keyframes help-pop {
+  from { transform: scale(0.85); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.help-modal-body {
+  background: var(--panel);
+  border-radius: 0 0 5px 5px;
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
+  overflow-y: auto;
+  color: #3d2b1c;
+}
+.help-modal-body div {
+  margin-bottom: 10px;
+}
+.help-modal-body div:last-child {
+  margin-bottom: 0;
+}
+.help-modal-body .help-section-title {
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 2px solid var(--header);
+  padding-bottom: 2px;
+  margin: 14px 0 8px;
+}
+.help-modal-body .help-section-title:first-child {
+  margin-top: 0;
+}
+
+/* Mute + volume pill in the bottom-left corner */
+.sound-control {
+  border: var(--card-border);
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  z-index: 9060;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 5px 6px;
+  border-radius: 999px;
+  background-color: var(--header);
+  background-image: var(--wood-planks-small);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  /* selectable text off, but pointer events ON (don't use .unselectable
+     here — it kills clicks) */
+  user-select: none;
+}
+.sound-toggle {
+  font-size: 16px;
+  line-height: 1;
+  transform: translateY(2px); /* emoji glyph doesn't need the text nudge */
+}
+.sound-slider {
+  width: 140px;
+  accent-color: var(--panel);
+  transform: none;
+  cursor: pointer;
+}
+
+/* ---- Victory screen: WANTED poster ---- */
+/* Fixed parchment/ink colors (not theme vars) so it reads as aged paper
+   on every theme */
+.wanted-poster {
+  width: 300px;
+  max-width: 90vw;
+  padding: 20px 18px 18px;
+  text-align: center;
+  user-select: none;
+  color: #3d2b1c;
+  background:
+    radial-gradient(ellipse at 25% 15%, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 55%),
+    radial-gradient(ellipse at 80% 90%, rgba(92, 64, 28, 0.18), rgba(92, 64, 28, 0) 60%),
+    #e8d9b0;
+  border: 4px solid #3d2b1c;
+  /* inner pinstripe frame + drop shadow */
+  box-shadow:
+    inset 0 0 0 4px #e8d9b0,
+    inset 0 0 0 6px #3d2b1c,
+    0 14px 36px rgba(0, 0, 0, 0.5);
+  transform: rotate(-2deg);
+  animation: wanted-drop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes wanted-drop {
+  from { transform: rotate(6deg) scale(1.8) translateY(-40px); opacity: 0; }
+  to { transform: rotate(-2deg) scale(1) translateY(0); opacity: 1; }
+}
+.wanted-title {
+  font-size: 46px;
+  font-weight: bold;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.wanted-subtitle {
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-top: 2px solid #3d2b1c;
+  border-bottom: 2px solid #3d2b1c;
+  padding: 4px 0 2px;
+  margin: 8px 14px 14px;
+}
+.wanted-portrait {
+  display: block;
+  width: 110px;
+  height: 110px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  background: #e2d3ab;
+  border: 3px solid #3d2b1c;
+  margin: 0 auto 10px;
+}
+.wanted-name {
+  font-size: 22px;
+  font-weight: bold;
+}
+.wanted-caption {
+  font-style: italic;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.wanted-reward {
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-top: 2px solid #3d2b1c;
+  margin: 0 14px;
+  padding-top: 8px;
+}
+
 .drag-container {
   position: fixed;
   left: 0;
@@ -37,27 +578,35 @@ html, body {
   width: 100%;
   height: 100%;
 }
+/* Cards are built as a header bar plus the body div right after it; border
+   both and drop the shared edge so they outline as one card */
+.board-column-header {
+  border: var(--card-border);
+}
+.board-column-header + div {
+  background-image: var(--wood-planks-small);
+  border: var(--card-border);
+  border-top: none;
+}
+
 .board-column-header {
   height: 30px; /* Reduced from 50px */
   line-height: 30px; /* Adjusted */
+  background-image: var(--wood-planks-small);
   overflow: hidden;
-  padding: 0 10px; /* Reduced padding */
+  padding: 2px 10px 0; /* top nudge re-centers the Special Elite font */
   text-align: center;
-  color: #fff;
+  color: var(--text-light);
   border-radius: 5px 5px 0 0;
   font-weight: bold;
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
-@media (max-width: 600px) {
-  .board-column-header {
-      text-indent: -1000px;
-  }
-}
 .board-column-content-wrapper {
+  background-image: var(--wood-planks-small);
   position: relative;
   padding: 4px; /* Reduced padding */
-  background: #f0f0f0;
+  background-color: var(--panel);
   height: 256px; /* Reduced from 425px */
   overflow-y: auto;
   border-radius: 0 0 5px 5px;
@@ -86,22 +635,14 @@ html, body {
 .board-item-content {
   position: relative;
   padding: 10px; /* Reduced padding */
-  background: #fff;
+  background-color: var(--item);
   border-radius: 4px;
   font-size: 14px; /* Reduced font size */
   cursor: pointer;
   box-shadow: 0px 1px 3px 0 rgba(0,0,0,0.2);
 }
 .board-item-content:hover {
-  background: #dfdfdf;
-}
-@media (max-width: 600px) {
-  .board-item-content {
-      text-align: center;
-  }
-  .board-item-content span {
-      display: none;
-  }
+  background: var(--item-hover);
 }
 .pointer-events-none {
   pointer-events: none; /* Disable mouse events */
@@ -112,7 +653,7 @@ html, body {
 .container {
   padding: 8px;
   margin: 0px 10px;
-  background: #f0f0f0;
+  background: var(--panel);
   overflow-y: auto;
   border-radius: 5px;
 }
@@ -136,6 +677,174 @@ html, body {
   background-repeat: no-repeat;
   aspect-ratio: 32 / 13;
   width: 33.33%; /* Use a simpler percentage */
+}
+
+/* Full-screen page container; dvh keeps mobile browser chrome from cutting it off */
+.app-screen {
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg);
+  background-image: var(--wood-planks);
+}
+/* The lobby screen nests inside the app screen; only the outer one should
+   paint the planks or the translucent layers stack and go muddy */
+.app-screen .app-screen {
+  background-color: transparent;
+  background-image: none;
+}
+/* Once the game is on, drop the train + moves board to the bottom-center of
+   the screen instead of letting them ride at the top */
+.app-screen.in-game {
+  justify-content: flex-end;
+}
+.screen-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+@supports (height: 100dvh) {
+  .app-screen,
+  .screen-overlay {
+    height: 100dvh;
+  }
+}
+
+.welcome-banner {
+  border: var(--card-border);
+  max-width: 90vw;
+  text-align: center;
+  background-image: var(--wood-planks-small);
+}
+
+.copy-invite-btn {
+  border: var(--card-border);
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  z-index: 9060;
+  background-color: var(--header);
+  background-image: var(--wood-planks-small);
+  user-select: none;
+}
+
+/* Non-host notice in the lobby card where the Start button would be */
+.host-wait-msg {
+  margin: 2px 0 12px;
+  font-size: 13px;
+  font-weight: bold;
+  text-align: center;
+  color: var(--muted);
+  animation: waiting-pulse 1.6s ease-in-out infinite;
+}
+
+/* "Round N" separator line in the events log */
+.event-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 0 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.event-divider::before,
+.event-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--muted);
+}
+
+/* In-game corner panels (player list / events) and their minimized toggles */
+.side-panel {
+  position: absolute;
+  top: 8px;
+  z-index: 9001;
+  user-select: none;
+}
+.side-panel-left {
+  left: 24px;
+  width: 280px;
+}
+.side-panel-right {
+  right: 24px;
+  width: 300px;
+}
+.side-toggle {
+  border: var(--card-border);
+  position: absolute;
+  top: 6px;
+  z-index: 9001;
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  background-color: var(--header);
+  background-image: var(--wood-planks-small);
+  color: var(--text-light);
+  user-select: none;
+}
+.side-toggle-left {
+  left: 24px;
+}
+.side-toggle-right {
+  right: 24px;
+}
+
+@media (max-width: 640px) {
+  .welcome-banner {
+    padding: 10px !important;
+  }
+  .welcome-banner h2 {
+    font-size: 13px;
+  }
+  .copy-invite-btn {
+    top: 52px;
+    font-size: 13px;
+  }
+  .side-panel,
+  .side-toggle {
+    top: 8px;
+  }
+  .side-panel-left {
+    left: 8px;
+    width: 150px;
+  }
+  .side-panel-right {
+    right: 8px;
+    width: 170px;
+  }
+  .side-toggle-left {
+    left: 8px;
+  }
+  .side-toggle-right {
+    right: 8px;
+  }
+  .side-panel .board-column-header {
+    font-size: 12px;
+  }
+  .side-panel li,
+  .side-panel div {
+    font-size: 12px !important;
+  }
+  .board-column-header {
+    font-size: 13px;
+  }
+  .board-column-content-wrapper {
+     background-image: var(--wood-planks-small);
+    height: 200px;
+  }
+  .board-item-content {
+    padding: 8px;
+    font-size: 12px;
+  }
+}
+.text-nudge {
+  transform: translateY(3px);
 }
 
 

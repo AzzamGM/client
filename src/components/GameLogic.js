@@ -1,691 +1,532 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import socket from '../socketService'; // Import your socket service
-import Shoot from '../assets/CowBoyDraw.gif'
-import Idle from '../assets/CowBoyIdle.gif'
-import Walk from '../assets/CowBoyWalk.gif'
-import Jump from '../assets/CowBoyJump.gif'
-import Climb from '../assets/CowBoyClimb.gif'
-import Wounded from '../assets/CowBoyWounded.gif'
+import socket from '../socketService';
+import { playSound } from '../sound';
+import { SKINS, skinFor } from '../skins';
 import Train from '../assets/train.png'
 import Train2 from '../assets/train2.png'
 import Train3 from '../assets/train3.png'
-function GameLogic({ setSpawnPlayers }) {
-    const [gameStarted, setGameStarted] = useState(false);
-    const [roundStarted, setRoundStarted] = useState(false);
-    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-    const [platformCount, setPlatformCount] = useState();
+import GunshotHitSfx from '../assets/gunshot_hit-1.wav'
+import GunshotMissSfx from '../assets/gunshot_miss-1.wav'
+import WalkingSfx from '../assets/walking.wav'
+import ClimbSfx from '../assets/climb.wav'
+import FailedStandoffSfx from '../assets/failed-standoff.wav'
+import TurnSfx from '../assets/turn.wav'
+import RecoverSfx from '../assets/recover.wav'
 
+const PLATFORM_IMAGES = [Train, Train2, Train3];
+
+const ROW_CLASS = 'flex flex-row place-items-end justify-center items-stretch top-0';
+const PLATFORM_CLASS = 'grow flex place-items-end justify-center unselectable platforms';
+
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Deep-copy a rows structure (array of platforms, each an array of player ids)
+const copyRows = (rows) => rows.map((p) => (Array.isArray(p) ? [...p] : p));
+
+// Extract scaleX from a computed transform string (matrix form), defaulting to 1
+const getScaleX = (transform) => {
+    if (transform && transform.startsWith('matrix')) {
+        return Number(transform.match(/matrix\(([^)]+)\)/)[1].split(', ')[0]);
+    }
+    return 1;
+};
+
+// A player's cowboy skin: the server assigns it at join and carries it in
+// the directions entry (slot 4); fall back to the numeric-id mapping
+const skinFromEntry = (entry, numericId) => {
+    if (entry && typeof entry[4] === 'number') {
+        return SKINS[((entry[4] % SKINS.length) + SKINS.length) % SKINS.length];
+    }
+    return skinFor(numericId);
+};
+
+function GameLogic() {
     const [localSpawns, setLocalSpawns] = useState([]);
+    const [localTopSpawns, setLocalTopSpawns] = useState([]); // top-row occupancy, for rendering restored games
     const [localDirections, setLocalDirections] = useState([]);
     const localBotRef = useRef(localSpawns);
     const localTopRef = useRef([])
     const localDirectionsRef = useRef(localDirections);
+    // Deaths registered the moment they happen (flipStatus only flips the
+    // directions map after a 2s animation delay)
+    const deadNumericRef = useRef(new Set());
+    // Players who are knocked down: can't be shot, and their next move is
+    // spent standing back up (unless it's a Standoff)
+    const downedRef = useRef(new Set());
 
-    const [platformSet, setPlatformSet] = useState(false);
+    // The directions entry (value array) for a numeric in-game player ID
+    const entryOf = (numericId) =>
+        Object.values(localDirectionsRef.current || {}).find((value) => Array.isArray(value) && value[0] === numericId) || null;
 
-    const CharShoot = Shoot
-    const CharIdle = Idle
-    const CharWalk = Walk
-    const CharJump = Jump
-    const CharClimb = Climb
-    const CharWounded = Wounded
-    const platform1 = Train
-    const platform2 = Train2
-    const platform3 = Train3
+    // Resolve a numeric in-game player ID to its socket id via the directions map
+    const socketIdOf = (numericId) => {
+        const entry = Object.entries(localDirectionsRef.current || {}).find(([key, value]) => value[0] === numericId);
+        return entry ? entry[0] : null;
+    };
 
+    const skinOf = (numericId) => skinFromEntry(entryOf(numericId), numericId);
 
-  useEffect(() => {
-        const spawnPlayers = (xPlayers) => {
-            const spawns = Array.from({ length: xPlayers + 2 }, () => []);
-            localTopRef.current = Array.from({ length: xPlayers + 2 }, () => []);
-            const spawnAreas = Array.from({ length: xPlayers }, (_, i) => i + 1);
+    // Broadcast an in-game event locally so UI components (e.g. the events feed) can react
+    const dispatchGameEvent = (detail) => {
+        window.dispatchEvent(new CustomEvent('gameEvent', { detail }));
+    };
 
-            for (let i = 0; i < xPlayers; i++) {
-                const randomIndex = Math.floor(Math.random() * spawnAreas.length);
-                const spawnPlayer = spawnAreas[randomIndex];
+    // Tell the UI whether a round is playing out and whose move is being applied
+    const setRoundState = (running, turn) => {
+        window.dispatchEvent(new CustomEvent('roundState', { detail: { running, turn } }));
+    };
 
-                spawns[spawnPlayer].push(i + 1); // Use i + 1 as the player ID
-                spawnAreas.splice(randomIndex, 1);
+    useEffect(() => {
+        // IMPORTANT: the refs the game simulation works on must be COPIES of
+        // the React state. The simulation mutates them as players act, and if
+        // state shared the same objects the rendered tree would change
+        // mid-game — React would then fight moveElement's manual DOM moves
+        // (removeChild crashes). State stays a frozen snapshot of game start
+        // (or the restored state) while the animation owns the board.
+        const handleSetSpawns = (GlobalSpawns) => {
+            setLocalSpawns(GlobalSpawns);
+            localBotRef.current = copyRows(GlobalSpawns);
+            // Size the (empty) top row to match so climbing never indexes an
+            // undefined platform — covers both game start and refresh/rejoin
+            if (localTopRef.current.length !== GlobalSpawns.length) {
+                localTopRef.current = GlobalSpawns.map(() => []);
+                setLocalTopSpawns(GlobalSpawns.map(() => []));
             }
-            socket.emit('startGame', spawns); // Emit the final structure
         };
 
-        setSpawnPlayers(() => spawnPlayers);
+        // Top-row occupancy from the server (rejoins mid-game get the real
+        // current layout, not just empty roofs)
+        const handleSetTopSpawns = (TopSpawns) => {
+            if (Array.isArray(TopSpawns)) {
+                localTopRef.current = copyRows(TopSpawns);
+                setLocalTopSpawns(TopSpawns);
+            }
+        };
 
-        const handleSetSpawns = (GlobalSpawns) => {
-            console.log('Global spawns received:', GlobalSpawns);
-            setLocalSpawns(GlobalSpawns); // Mark that spawns have been set
-            localBotRef.current = GlobalSpawns; // Update the ref as well
-            console.log('Local spawns:', localBotRef.current)
-
+        // A player left mid-game (quit, kicked, or grace period expired):
+        // strike their cowboy from the board like a death, with a fade-out
+        const handlePlayerLeftGame = ({ numericId } = {}) => {
+            if (typeof numericId !== 'number') return;
+            const strip = (rows) => rows.map((p) => (Array.isArray(p) ? p.filter((id) => id !== numericId) : p));
+            localBotRef.current = strip(localBotRef.current);
+            localTopRef.current = strip(localTopRef.current);
+            deadNumericRef.current.add(numericId);
+            downedRef.current.delete(numericId);
+            const entry = entryOf(numericId);
+            if (entry) entry[3] = 'D';
+            const element = document.getElementById(String(numericId));
+            if (element) {
+                element.style.transition = 'all 0.8s ease';
+                element.style.opacity = '0';
+                setTimeout(() => element.remove(), 800);
+            }
         };
 
         socket.on('setPlayerDirections', setLocalDirections);
         socket.on('setSpawns', handleSetSpawns);
+        socket.on('setTopSpawns', handleSetTopSpawns);
+        socket.on('playerLeftGame', handlePlayerLeftGame);
 
-        // Cleanup listener on unmount
         return () => {
             socket.off('setPlayerDirections', setLocalDirections);
             socket.off('setSpawns', handleSetSpawns);
+            socket.off('setTopSpawns', handleSetTopSpawns);
+            socket.off('playerLeftGame', handlePlayerLeftGame);
         };
-    }, [setSpawnPlayers]); // Add spawnsSet to dependency array
-
-    useEffect(() => {
-        const handleUpdatePlayers = (players) => {
-            //console.log('Updated players:', players);
-            //console.log('Player count was received:', Object.keys(players).length);
-
-            Object.keys(players).forEach((xPlayerId, i) => {
-                const xPlayerMoves = players[xPlayerId];
-
-                if (xPlayerMoves.length === 3) {
-                    console.log(`Player ${i + 1} (${xPlayerId}) picked moves:`, xPlayerMoves);
-                } else {
-                    console.log(`Player ${i + 1} (${xPlayerId}) didn't pick yet:`, xPlayerMoves);
-                }
-            });
-        };
-
-        socket.on('updatePlayers', handleUpdatePlayers);
-    
-        return () => {
-            socket.off('updatePlayers', handleUpdatePlayers);
-        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {
         const handleStartRound = async (players) => {
-            if (!roundStarted) {
+            const maxMoves = Math.max(...Object.values(players).map(moves => moves.length));
 
-                console.log('Round is starting...');
-    
-                const maxMoves = Math.max(...Object.values(players).map(moves => moves.length));
-    
+            setRoundState(true, null);
+            try {
                 for (let moveIndex = 0; moveIndex < maxMoves; moveIndex++) {
-                    for (const [i, xPlayerId] of Object.entries(Object.keys(players))) {
+                    for (const xPlayerId of Object.keys(players)) {
+                        // Once only one player is left standing the game is
+                        // decided; stop applying the remaining moves
+                        const totalPlayers = Object.keys(localDirectionsRef.current || {}).length;
+                        if (totalPlayers > 1 && totalPlayers - deadNumericRef.current.size <= 1) {
+                            return;
+                        }
+
                         const xPlayerMoves = players[xPlayerId];
-                        
-                        if (moveIndex < xPlayerMoves.length) {
+                        // This session's character is the numeric id the
+                        // directions map assigned to it — NOT its position
+                        // in the moves list, which only matches when the
+                        // random spawn layout happens to be the identity.
+                        // Using the index made moves drive someone else's
+                        // cowboy (and mis-check dead/downed status)
+                        const sessionProps = (localDirectionsRef.current || {})[xPlayerId];
+
+                        if (sessionProps && moveIndex < xPlayerMoves.length) {
                             const move = xPlayerMoves[moveIndex];
-                            applyMove(parseInt(i) + 1, xPlayerId, moveIndex + 1, move);
+                            setRoundState(true, xPlayerId);
+                            applyMove(sessionProps[0], move);
                         }
-    
-                        // Delay between iterations
-                        let Status = localDirectionsRef.current[xPlayerId][3]
-                        console.log(Status)
-                        if(Status !== 'D'){
-                        await delay(2500); // Delay of 500 milliseconds (adjust as needed)
-                        }
-                        else{
-                            console.log('Player is dead')
+
+                        // Delay between moves; dead players' turns are skipped instantly
+                        const status = sessionProps ? sessionProps[3] : 'D';
+                        if (status !== 'D') {
+                            await delay(2500);
                         }
                     }
                 }
-    
-                //setRoundStarted(false); // Reset round started flag after completing the round
+            } finally {
+                // Round is over (or aborted by a win): unlock the UI
+                setRoundState(false, null);
+                // Persist the round's outcome so a refresh/rejoin restores
+                // current positions instead of the initial spawn layout.
+                // Every client sends the same simulated result, so last
+                // write wins harmlessly.
+                socket.emit('syncGameState', {
+                    bot: localBotRef.current,
+                    top: localTopRef.current,
+                    props: localDirectionsRef.current,
+                });
             }
         };
-    
+
         socket.on('StartRound', handleStartRound);
-        
+
         return () => {
             socket.off('StartRound', handleStartRound);
         };
-    }, [roundStarted]);
-    
-    const applyMove = useCallback((player, playerId, moveNumber, move) => {
-        // Ensure the latest state values are used
-        let currentLocalSpawns = localBotRef.current;
-        // const currentLocalDirections = localDirectionsRef.current;
-    
-        if (localDirectionsRef.current) {
-            const directionEntry = Object.entries(localDirectionsRef.current).find(([key, value]) => value[0] === player);
-            
-            if (directionEntry && directionEntry[1].length > 1) {
-                const VDirection = directionEntry[1][1]; // Get the HORIZONTAL direction if available
-                const HDirection = directionEntry[1][2]; // Get the VERTICAL direction if available
-                const Status = directionEntry[1][3]; // Get the player status: (D)ead or (A)live
-                if(HDirection === 'B'){
-                    currentLocalSpawns = localBotRef.current;
-                }
-                else{
-                    currentLocalSpawns = localTopRef.current;
-                }
-                const flattened = currentLocalSpawns.flat();
-                const targetIndex = flattened.indexOf(player);
-                
-                console.log(`Player ${player} Move ${moveNumber}: ${move}`);
-                if (Status === 'D') {
-                    console.log(`Player ${player} is already dead.`);
-                    return;
-                } else {
-                    switch (move) {
-                        case 'Forward':
-                            console.log(HDirection)
-                            movePlayer(currentLocalSpawns, player, HDirection, VDirection); 
-                            break;
-                        case 'Attack':
-                            findNearestPlayer(player, HDirection);
-                            console.log('ATTACKED');
-                            break;
-                        case 'Turn':
-                            turnPlayer(player)
-                            break;
-                        case 'Climb':
-                            climbPlayer(player, HDirection, VDirection);
-                            break;
-                        default:
-                            console.log('Unknown move:', move);
-                            
-                    }
-                    console.log('T: ', localTopRef.current)
-                    console.log('B: ', localBotRef.current)
-                    console.log('directionEntry: ', directionEntry)
-                }
-            }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const applyMove = useCallback((player, move) => {
+        const entry = entryOf(player);
+        if (!entry || entry.length <= 1) return;
+
+        const VDirection = entry[1]; // L/R facing
+        const HDirection = entry[2]; // (T)op or (B)ottom row
+        const Status = entry[3]; // (D)ead or (A)live
+
+        if (Status === 'D' || deadNumericRef.current.has(player)) {
+            return;
         }
+
+        if (downedRef.current.has(player)) {
+            // Downed: the move is spent getting back up...
+            downedRef.current.delete(player);
+            if (move === 'Standoff') {
+                // ...unless it's a Standoff: spring up and retaliate
+                dispatchGameEvent({ type: 'standoffUp', actor: socketIdOf(player) });
+                findNearestPlayer(player, HDirection);
+            } else {
+                const element = document.getElementById(player);
+                if (element) element.src = skinOf(player).idle;
+                playSound(RecoverSfx, 0.6);
+                dispatchGameEvent({ type: 'recovered', target: socketIdOf(player), move });
+            }
+            return;
+        }
+
+        switch (move) {
+            case 'Forward':
+                dispatchGameEvent({ type: 'moved', target: socketIdOf(player) });
+                playSound(WalkingSfx, 0.3);
+                movePlayer(player, HDirection, VDirection);
+                break;
+            case 'Shoot':
+            case 'Attack': // old name, kept so in-flight moves from stale clients still resolve
+                findNearestPlayer(player, HDirection);
+                break;
+            case 'Turn':
+                dispatchGameEvent({ type: 'turned', target: socketIdOf(player) });
+                playSound(TurnSfx, 0.6);
+                turnPlayer(player)
+                break;
+            case 'Climb':
+                dispatchGameEvent({ type: 'climbed', target: socketIdOf(player) });
+                playSound(ClimbSfx, 0.6);
+                climbPlayer(player, HDirection, VDirection);
+                break;
+            case 'Standoff': {
+                // Not downed: drop down defensively, primed for a standoff
+                downedRef.current.add(player);
+                const element = document.getElementById(player);
+                if (element) element.src = skinOf(player).wounded;
+                playSound(FailedStandoffSfx, 0.7);
+                dispatchGameEvent({ type: 'wentDown', target: socketIdOf(player) });
+                break;
+            }
+            default:
+                console.log('Unknown move:', move);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const moveElement = useCallback((playerID, newPlatform, vdirection, hdirection, type) => {
-        console.log('current hdirection: ', hdirection)
         const element = document.getElementById(playerID);
-        let targetDiv;
+        const isFall = type === 'FellForward' || type === 'FellBack';
 
-        if (hdirection === 'T') {
-            targetDiv = document.getElementById('tp' + newPlatform);
-        } else if (hdirection === 'B') {
-            targetDiv = document.getElementById('bp' + newPlatform);
-        }
-        if (hdirection === 'B' && type === 'Climb') {
-            targetDiv = document.getElementById('tp' + newPlatform);
-        } else if (hdirection === 'T' && type === 'Climb') {
-            targetDiv = document.getElementById('bp' + newPlatform);
-        }
-        
-        const currentDiv = element.parentElement
-        const indexOfElement = Array.from(currentDiv.children).findIndex(child => child.id === String(playerID));
+        // Climbing crosses rows, everything else stays on the current row
+        const onTop = type === 'Climb' ? hdirection === 'B' : hdirection === 'T';
+        const targetDiv = document.getElementById((onTop ? 'tp' : 'bp') + newPlatform);
+
         if (!element || !targetDiv) {
             console.log('Element or targetDiv not found');
             return;
         }
+        const currentDiv = element.parentElement
+        const indexOfElement = Array.from(currentDiv.children).findIndex(child => child.id === String(playerID));
         // Calculate the current position and the target position
         const rect = element.getBoundingClientRect();
         const targetRect = targetDiv.getBoundingClientRect();
-        
-        let minusWidth = element.getBoundingClientRect().width;
-    
-        if (vdirection === 'L') {
-            minusWidth = element.getBoundingClientRect().width / 2;
-        } else {
-            minusWidth = -element.getBoundingClientRect().width / 2;
-        }
 
-        // Shift all current child divs to the left or right
+        const minusWidth = (vdirection === 'L' ? 1 : -1) * rect.width / 2;
 
-        const currnetChildDivs = currentDiv.querySelectorAll('img');
-        currnetChildDivs.forEach((child, childIndex) => {
-            const currentChildTransform = window.getComputedStyle(child).transform;
-            console.log(indexOfElement, childIndex)
-            if(childIndex !== indexOfElement) {       
+        // When the mover re-parents onto its new platform the flex layout
+        // reflows the bystanders into their final slots; the pre-shift
+        // translateX must be released on that same tick or the bystander
+        // snaps. Climbs re-parent sooner than walks, so settle on its clock.
+        const reparentMs = type === 'Climb' ? 900 : 1500;
 
-            
-            let shiftDirection = 1 // if index of tyhis child
+        // Animate a bystander sliding over to fill / make room: walk briefly,
+        // then settle back to idle with only its facing (scaleX) kept. A
+        // downed bystander keeps its wounded sprite — it just slides aside.
+        const shiftChild = (child, makeTransform) => {
+            const id = Number(child.id);
+            const downed = downedRef.current.has(id);
+            const baseTransform = window.getComputedStyle(child).transform;
+            const scaleX = getScaleX(baseTransform);
             setTimeout(() => {
-
-                if (childIndex > indexOfElement) {
-                    // Apply a different transformation or effect if the indices match
-                    shiftDirection = -1
-                } else {
-                    shiftDirection = 1
-                }
-
-                let scaleX = 1; // Default to positive scale
-                if (currentChildTransform && currentChildTransform.startsWith('matrix')) {
-                    const matrixValues = currentChildTransform.match(/matrix\(([^)]+)\)/)[1].split(', ').map(Number);
-                    scaleX = matrixValues[0]; // First value is scaleX
-                }
-
-
-
-                // Calculate the adjustment based on the scale
-                //(scaleX < 0 ? 1 : -1)
-                const adjustment = (scaleX < 0 ? 1 : 1) * Math.abs(minusWidth) * shiftDirection;
-                
-                console.log(`adjustment: ${adjustment}, for child ${childIndex}, ${child.id}`);
-                // Apply the translateX transformation
-                if (type !== 'FellForward' && type !== 'FellBack') {
-                    child.style.transform = `translateX(${adjustment}px) ${currentChildTransform} `;
-                    console.log('didnt fall')
-                }
-                child.style.transition = `all 0.2s linear`; 
-                child.src = CharWalk;
-
+                const transform = makeTransform(baseTransform, scaleX);
+                if (transform) child.style.transform = transform;
+                child.style.transition = 'all 0.2s linear';
+                if (!downed) child.src = skinOf(id).walk;
             }, 200);
             setTimeout(() => {
-                child.src = CharIdle;
+                if (!downed) child.src = skinOf(id).idle;
             }, 400);
             setTimeout(() => {
-                let scaleX = 1; // Default to positive scale
-                if (currentChildTransform && currentChildTransform.startsWith('matrix')) {
-                    const matrixValues = currentChildTransform.match(/matrix\(([^)]+)\)/)[1].split(', ').map(Number);
-                    scaleX = matrixValues[0]; // First value is scaleX
-                }
-                child.style.transform = `scaleX(${scaleX})`; 
-                child.style.transition = ``;
-            }, 1500);
-        }
-        else{
-            return
-        }
-        })
+                child.style.transform = `scaleX(${scaleX})`;
+                child.style.transition = '';
+            }, reparentMs);
+        };
 
+        // Close the gap the mover leaves behind on its current platform
+        currentDiv.querySelectorAll('img').forEach((child, childIndex) => {
+            if (childIndex === indexOfElement) return;
+            const shiftDirection = childIndex > indexOfElement ? -1 : 1;
+            shiftChild(child, (base) =>
+                isFall ? null : `translateX(${Math.abs(minusWidth) * shiftDirection}px) ${base}`
+            );
+        });
 
-
-
-
-
-
-
-
-
-        // Shift all target child divs to the left or right
-        const childDivs = targetDiv.querySelectorAll('img');
-        childDivs.forEach(child => {
-            if(child !== element){
-                
-            
-            
-            const currentChildTransform = window.getComputedStyle(child).transform;
-            setTimeout(() => {
-            // Extract scaleX from the current transform if it's in matrix form
-            let scaleX = 1; // Default to positive scale
-            if (currentChildTransform && currentChildTransform.startsWith('matrix')) {
-                const matrixValues = currentChildTransform.match(/matrix\(([^)]+)\)/)[1].split(', ').map(Number);
-                scaleX = matrixValues[0]; // First value is scaleX
-            }
-    
-            // Calculate the adjustment based on the scale
-            const adjustment = (scaleX < 0 ? 1 : -1) * minusWidth;
-    
-            // Apply the translateX transformation
-            child.style.transform = `${currentChildTransform} translateX(${adjustment}px)`;
-            child.style.transition = `all 0.2s linear`; 
-    
-            child.src = CharWalk;
-            }, 200);
-            // Reset image after a brief period
-            setTimeout(() => {          
-                child.src = CharIdle;
-            }, 400);
-    
-            // Reset the transform after a delay
-            setTimeout(() => {
-                let scaleX = 1; // Default to positive scale
-                if (currentChildTransform && currentChildTransform.startsWith('matrix')) {
-                    const matrixValues = currentChildTransform.match(/matrix\(([^)]+)\)/)[1].split(', ').map(Number);
-                    scaleX = matrixValues[0]; // First value is scaleX
-                }
-                child.style.transform = `scaleX(${scaleX})`; 
-                child.style.transition = ``;
-
-            }, 1500); // Match with the transition duration
-        }
-    });
-    
-
-
-
-
+        // Make room on the target platform
+        targetDiv.querySelectorAll('img').forEach((child) => {
+            if (child === element) return;
+            shiftChild(child, (base, scaleX) =>
+                `${base} translateX(${(scaleX < 0 ? 1 : -1) * minusWidth}px)`
+            );
+        });
 
         // Calculate translate values
         const translateX = (targetRect.left + targetRect.width / 2) - (rect.left + rect.width / 2);
         const translateY = targetRect.bottom - rect.bottom; // Keep vertical position unchanged
-    
+
         // Get the current transform for the player element
         const currentScale = element.style.transform;
-    
-        element.style.transition = (type === 'Forward') || (type === 'FellForward') ? 'all 1.5s linear' : 'all 1s ease';
-        const transformValue = element.style.transform; // Get the transform value
-        const scaleXMatch = transformValue.match(/scaleX\(([-+]?\d*\.?\d+)\)/); // Regex to extract scaleX        
-        const scaleX = parseFloat(scaleXMatch[1]); // Convert matched value to a number
+
+        element.style.transition =
+            (type === 'Forward') || (type === 'FellForward') ? 'all 1.5s linear'
+            : type === 'Climb' ? 'all 1.4s ease' // a touch slower so the climb reads
+            : 'all 1s ease';
+        // Falls fly out in the direction of the movement/push (vdirection):
+        // for FellForward that's the walker's own heading, for FellBack the
+        // shooter's bullet direction — NOT the victim's facing, which points
+        // the wrong way when shot from behind
+        const fallSign = vdirection === 'L' ? -1 : 1;
         // Set the new transform, keeping the scaleX intact
-        if (targetDiv.childNodes.length > 0 && type !== 'FellForward' && type !== 'FellBack') {
-            element.style.transform = `translate(${translateX + (minusWidth * (targetDiv.childNodes.length))}px, ${translateY}px) ${currentScale}`;
-        } else if (type !== 'FellForward' && type !== 'FellBack') {
+        if (isFall) {
+            element.style.transform = `translate(${500 * fallSign}px, ${translateY}px) ${currentScale}`;
+        } else if (targetDiv.childNodes.length > 0) {
+            element.style.transform = `translate(${translateX + (minusWidth * targetDiv.childNodes.length)}px, ${translateY}px) ${currentScale}`;
+        } else {
             element.style.transform = `translate(${translateX}px, ${translateY}px) ${currentScale}`;
         }
-        else{
-            element.style.transform = `translate(${500*scaleX}px, ${translateY}px) ${currentScale}`;
-        }
-
-
 
         if (type === 'Forward' || type === 'FellForward') {
-            element.src = CharWalk;
+            element.src = skinOf(playerID).walk;
         } else if (type === 'Climb') {
-            element.src = CharClimb;
-        } else if(type === 'Back' || type === 'FellBack'){ 
-            element.src = CharWounded;
+            element.src = skinOf(playerID).climb;
+        } else if (type === 'Back' || type === 'FellBack') {
+            element.src = skinOf(playerID).wounded;
         }
-        
-    
-        // After a delay, append the element to the new platform
-        if(type === 'Back' || type === 'Forward'){
-            setTimeout(() => {
-                vdirection === 'R' ? targetDiv.insertBefore(element, targetDiv.firstChild) : targetDiv.appendChild(element);
-                
-                // Maintain the existing scale transformation
-                element.style.transform = currentScale; // Keep the scale transformation
-                element.style.transition = ``; // Reset the transition
-                if (type === 'Forward') {
-                    element.src = CharIdle;
-                }
-            }, 1500); // Match the duration with CSS transition
-        }
-        else if(type === 'Climb'){
-            setTimeout(() => {
-                vdirection === 'R' ? targetDiv.insertBefore(element, targetDiv.firstChild) : targetDiv.appendChild(element);
-                
-                // Maintain the existing scale transformation
-                element.style.transform = currentScale; // Keep the scale transformation
-                element.style.transition = ``; // Reset the transition
-                element.src = CharIdle;
-                
-            }, 500); // Match the duration with CSS transition   
-        }
-        else{
-            setTimeout(() => {
-                element.remove()           
-            }, 1500); // Match the duration with CSS transition   
-        }
-    }, []);
-    
-    
-    
-    const turnPlayer = useCallback((playerID) => {
-        const currentLocalDirections = localDirectionsRef.current;
 
-        // Ensure we have the current directions
-        if (currentLocalDirections) {
-            const directionEntry = Object.entries(currentLocalDirections).find(([key, value]) => value[0] === playerID);
-            
-            if (directionEntry && directionEntry[1].length > 1) {
-                const currentDirection = directionEntry[1][1]; // Get the current direction
-                
-                // Toggle direction
-                const newDirection = currentDirection === 'L' ? 'R' : 'L';
-                
-                // Update the direction in localDirectionsRef
-                directionEntry[1][1] = newDirection; // Set the new direction
-    
-                console.log(`Player ${playerID} direction turned from ${currentDirection} to ${newDirection}`);
-            }
+        if (isFall) {
+            setTimeout(() => {
+                element.remove()
+            }, 1500); // Match the duration with CSS transition
+        } else {
+            // After the move animation, re-parent the element onto its new platform
+            setTimeout(() => {
+                vdirection === 'R' ? targetDiv.insertBefore(element, targetDiv.firstChild) : targetDiv.appendChild(element);
+
+                element.style.transform = currentScale; // Keep the scale transformation
+                element.style.transition = ''; // Reset the transition
+                if (type !== 'Back') { // shot survivors stay wounded until they recover
+                    element.src = skinOf(playerID).idle;
+                }
+            }, reparentMs); // Same clock the bystanders settle on
         }
-    
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const turnPlayer = useCallback((playerID) => {
+        const entry = entryOf(playerID);
+        if (entry && entry.length > 1) {
+            entry[1] = entry[1] === 'L' ? 'R' : 'L';
+        }
+
         const element = document.getElementById(playerID);
-        
         if (!element) {
             console.log('Element not found');
             return;
         }
-        
+
         // Flip the element visually
         const scale = element.style.transform;
-        const transition = element.style.transition;
+        element.style.transition = 'all 0.05s linear';
+        element.style.transform = scale === 'scaleX(-1)' ? 'scaleX(1)' : 'scaleX(-1)';
 
-        element.style.transition = 'all 0.05s linear'; 
-  
-        scale === 'scaleX(-1)' ? element.style.transform = 'scaleX(1)' :  element.style.transform = 'scaleX(-1)';
-
-        // Reset the transition immediately after the flip
+        // Reset the transition after the flip
         setTimeout(() => {
-            element.style.transition = `transition`
-            console.log(element.style.transform);
+            element.style.transition = '';
         }, 1000);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    
-    
 
-const movePlayer = useCallback((Platforms, playerId, hdirection, vdirection) => {
-    // Create a deep copy of Platforms to avoid direct modification
+    const movePlayer = useCallback((playerId, hdirection, vdirection) => {
+        const rowRef = hdirection === 'T' ? localTopRef : localBotRef;
+        const updatedPlatforms = copyRows(rowRef.current);
 
-    let currentBotLocalSpawns = localBotRef.current;
-    let currentTopLocalSpawns = localTopRef.current;
-    const botUpdatedPlatforms = currentBotLocalSpawns.map(platform => [...platform]); // Shallow copy of each platform
-    const topUpdatedPlatforms = currentTopLocalSpawns.map(platform => [...platform]); // Shallow copy of each platform
-    if(hdirection === 'B'){
-        for (let i = 0; i < botUpdatedPlatforms.length; i++) {
-            if (botUpdatedPlatforms[i].includes(playerId)) {
-                const index = botUpdatedPlatforms[i].indexOf(playerId);
-                const value = botUpdatedPlatforms[i].splice(index, 1)[0]; // Remove playerId
-                if (vdirection === 'L' && i > 0) {
-                    moveElement(playerId, i - 1, vdirection, hdirection, 'Forward');
-                    botUpdatedPlatforms[i - 1].push(value); // Move left
-                    console.log(`${playerId} moved L (${i} to ${i - 1})`);
-                } else if (vdirection === 'R' && i < botUpdatedPlatforms.length - 1) {
-                    moveElement(playerId, i + 1, vdirection, hdirection, 'Forward');
-                    botUpdatedPlatforms[i + 1].unshift(value); // Move right
-                    console.log(`${playerId} moved R (${i} to ${i + 1})`);
-                } else {
-                    moveElement(playerId, i, vdirection, hdirection, 'FellForward');
-                    flipStatus(playerId);
-                    console.log(playerId, ' fell off the platforms');
-                }
-                localBotRef.current = botUpdatedPlatforms
-                break;
+        for (let i = 0; i < updatedPlatforms.length; i++) {
+            if (!updatedPlatforms[i].includes(playerId)) continue;
+
+            const index = updatedPlatforms[i].indexOf(playerId);
+            const value = updatedPlatforms[i].splice(index, 1)[0];
+            if (vdirection === 'L' && i > 0) {
+                moveElement(playerId, i - 1, vdirection, hdirection, 'Forward');
+                updatedPlatforms[i - 1].push(value);
+            } else if (vdirection === 'R' && i < updatedPlatforms.length - 1) {
+                moveElement(playerId, i + 1, vdirection, hdirection, 'Forward');
+                updatedPlatforms[i + 1].unshift(value);
+            } else {
+                // Walked off the edge of the train
+                moveElement(playerId, i, vdirection, hdirection, 'FellForward');
+                flipStatus(playerId);
+                deadNumericRef.current.add(playerId);
+                dispatchGameEvent({ type: 'fellOff', target: socketIdOf(playerId), died: true });
             }
-        } // Update state with the new platformsw
-    }
-    else if(hdirection === 'T'){
-        for (let i = 0; i < topUpdatedPlatforms.length; i++) {
-            if (topUpdatedPlatforms[i].includes(playerId)) {
-                const index = topUpdatedPlatforms[i].indexOf(playerId);
-                const value = topUpdatedPlatforms[i].splice(index, 1)[0]; // Remove playerId
-                if (vdirection === 'L' && i > 0) {
-                    moveElement(playerId, i - 1, vdirection, hdirection, 'Forward');
-                    topUpdatedPlatforms[i - 1].push(value); // Move left
-                    console.log(`${playerId} moved L (${i} to ${i - 1})`);
-                } else if (vdirection === 'R' && i < topUpdatedPlatforms.length - 1) {
-                    moveElement(playerId, i + 1, vdirection, hdirection, 'Forward');
-                    topUpdatedPlatforms[i + 1].unshift(value); // Move right
-                    console.log(`${playerId} moved R (${i} to ${i + 1})`);
-                } else {
-                    moveElement(playerId, i, vdirection, hdirection, 'FellForward');
-                    flipStatus(playerId);
-                    console.log(playerId, ' fell off the platforms');
-                }
-                localTopRef.current = topUpdatedPlatforms
-                break;
-            }
-        } // Update state with the new platformsw
-    }
-}, []);
+            rowRef.current = updatedPlatforms;
+            break;
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-const flipStatus = useCallback((playerId) => {
-    const currentLocalDirections = localDirectionsRef.current;
-
-    // Ensure we have the current directions
-    if (currentLocalDirections) {
-        const statusEntry = Object.entries(currentLocalDirections).find(([key, value]) => value[0] === playerId);
-        
-        if (statusEntry && statusEntry[1].length > 1) {
+    const flipStatus = useCallback((playerId) => {
+        const entry = entryOf(playerId);
+        if (entry && entry.length > 1) {
             setTimeout(() => {
-                const currentStatus = statusEntry[1][3]; // Get the current direction
-                
-                // Toggle direction
-                const newStatus = currentStatus === 'D' ? 'A' : 'D';
-                console.log('new: ', newStatus, 'current: ', currentStatus);
-                
-                // Update the direction in localDirectionsRef
-                statusEntry[1][3] = newStatus; // Set the new direction
-
-                console.log(`Player ${playerId} direction turned from ${currentStatus} to ${newStatus}`);
-            }, 2000); // 2-second delay
+                entry[3] = entry[3] === 'D' ? 'A' : 'D';
+            }, 2000); // wait out the death animation
         }
-    }
-}, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
+    const climbPlayer = useCallback((playerId, hdirection, vdirection) => {
+        const fromRef = hdirection === 'T' ? localTopRef : localBotRef;
+        const toRef = hdirection === 'T' ? localBotRef : localTopRef;
+        const fromPlatforms = copyRows(fromRef.current);
+        const toPlatforms = copyRows(toRef.current);
 
-const climbPlayer = useCallback((playerId, hdirection, vdirection) => {
-    console.log(hdirection)
-    let currentBotLocalSpawns = localBotRef.current;
-    let currentTopLocalSpawns = localTopRef.current;
-    const botUpdatedPlatforms = currentBotLocalSpawns.map(platform => [...platform]); // Shallow copy of each platform
-    const topUpdatedPlatforms = currentTopLocalSpawns.map(platform => [...platform]); // Shallow copy of each platform
+        for (let i = 0; i < fromPlatforms.length; i++) {
+            if (!fromPlatforms[i].includes(playerId)) continue;
 
-    const currentLocalDirections = localDirectionsRef.current;
-
-    // Ensure we have the current directions
-
-    console.log('CLIMB LOG: ', hdirection, vdirection)
-    if(hdirection === 'T'){
-        for (let i = 0; i < topUpdatedPlatforms.length; i++) {
-            if (topUpdatedPlatforms[i].includes(playerId)) {
-                const index = topUpdatedPlatforms[i].indexOf(playerId);
-                const value = topUpdatedPlatforms[i].splice(index, 1)[0]; // Remove playerId
-                if (vdirection === 'L') {
-                    moveElement(playerId, i, vdirection, hdirection, 'Climb');
-                    botUpdatedPlatforms[i].push(value); 
-
-                } else if (vdirection === 'R') {
-                    moveElement(playerId, i, vdirection, hdirection, 'Climb');
-                    botUpdatedPlatforms[i].unshift(value);          
-                } 
-                localBotRef.current = botUpdatedPlatforms
-                localTopRef.current = topUpdatedPlatforms
-                console.log('moved to bottom', hdirection)
-                break;
+            const index = fromPlatforms[i].indexOf(playerId);
+            const value = fromPlatforms[i].splice(index, 1)[0];
+            moveElement(playerId, i, vdirection, hdirection, 'Climb');
+            if (vdirection === 'L') {
+                toPlatforms[i].push(value);
+            } else {
+                toPlatforms[i].unshift(value);
             }
+            fromRef.current = fromPlatforms;
+            toRef.current = toPlatforms;
+            break;
         }
-    } 
-    else if(hdirection === 'B'){
-        for (let i = 0; i < botUpdatedPlatforms.length; i++) {
-            if (botUpdatedPlatforms[i].includes(playerId)) {
-                const index = botUpdatedPlatforms[i].indexOf(playerId);
-                const value = botUpdatedPlatforms[i].splice(index, 1)[0]; // Remove playerId
-                if (vdirection === 'L') {
-                    moveElement(playerId, i, vdirection, hdirection, 'Climb');
-                    topUpdatedPlatforms[i].push(value); 
 
-                } else if (vdirection === 'R') {
-                    moveElement(playerId, i, vdirection, hdirection, 'Climb');
-                    topUpdatedPlatforms[i].unshift(value);          
-                } 
-                localBotRef.current = botUpdatedPlatforms
-                localTopRef.current = topUpdatedPlatforms
-                console.log('moved to top', hdirection)
-                break;
-            }
+        // Flip the player's row (T/B) in the directions map
+        const entry = entryOf(playerId);
+        if (entry && entry.length > 1) {
+            entry[2] = entry[2] === 'B' ? 'T' : 'B';
         }
-    }    // Update state with the new platformsw
-    if (currentLocalDirections) {
-        const directionEntry = Object.entries(currentLocalDirections).find(([key, value]) => value[0] === playerId);
-        
-        if (directionEntry && directionEntry[1].length > 1) {
-            const currentHDirection = directionEntry[1][2]; // Get the current direction
-            
-            // Toggle direction
-            const newHDirection = currentHDirection === 'B' ? 'T' : 'B';
-            
-            // Update the direction in localDirectionsRef
-            directionEntry[1][2] = newHDirection; // Set the new direction
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-            console.log(`Player ${playerId} direction turned from ${currentHDirection} to ${newHDirection}`);
-        }
-    }
-}, []);
+    const knockbackPlayer = useCallback((playerId, vdirection, hdirection, shooterId) => {
+        // Delayed so the knockback lands with the shooter's draw animation
+        setTimeout(() => {
+            const rowRef = hdirection === 'T' ? localTopRef : localBotRef;
+            const updatedPlatforms = copyRows(rowRef.current);
 
-const knockbackPlayer = useCallback((playerId, vdirection, hdirection) => {
-    let currentBotLocalSpawns = localBotRef.current;
-    let currentTopLocalSpawns = localTopRef.current;
-    const botUpdatedPlatforms = currentBotLocalSpawns.map(platform => [...platform]); // Shallow copy of each platform
-    const topUpdatedPlatforms = currentTopLocalSpawns.map(platform => [...platform]); // Shallow copy of each platform
+            for (let i = 0; i < updatedPlatforms.length; i++) {
+                if (!updatedPlatforms[i].includes(playerId)) continue;
 
-
-    setTimeout(() => {
-        
-    if(hdirection === 'T'){
-        for (let i = 0; i < topUpdatedPlatforms.length; i++) {
-            if (topUpdatedPlatforms[i].includes(playerId)) {
-                const index = topUpdatedPlatforms[i].indexOf(playerId);
-                const value = topUpdatedPlatforms[i].splice(index, 1)[0]; // Remove playerId
+                const index = updatedPlatforms[i].indexOf(playerId);
+                const value = updatedPlatforms[i].splice(index, 1)[0];
                 if (vdirection === 'L' && i > 0) {
                     moveElement(playerId, i - 1, vdirection, hdirection, 'Back');
-                    topUpdatedPlatforms[i - 1].push(value); // Move left
-                    console.log(`${playerId} was shot L (${i} to ${i - 1})`);
-                } else if (vdirection === 'R' && i < topUpdatedPlatforms.length - 1) {
+                    downedRef.current.add(playerId); // survived the shot, but downed
+                    updatedPlatforms[i - 1].push(value);
+                } else if (vdirection === 'R' && i < updatedPlatforms.length - 1) {
                     moveElement(playerId, i + 1, vdirection, hdirection, 'Back');
-                    topUpdatedPlatforms[i + 1].unshift(value); // Move right
-                    console.log(`${playerId} was shot R (${i} to ${i + 1})`);
-                }
-                else{
+                    downedRef.current.add(playerId); // survived the shot, but downed
+                    updatedPlatforms[i + 1].unshift(value);
+                } else {
+                    // Knocked off the edge of the train
                     moveElement(playerId, i, vdirection, hdirection, 'FellBack');
                     flipStatus(playerId);
-                    console.log(playerId, ' fell off the platforms');
+                    deadNumericRef.current.add(playerId);
+                    dispatchGameEvent({ type: 'knockedOff', actor: socketIdOf(shooterId), target: socketIdOf(playerId), died: true });
                 }
-                localTopRef.current = topUpdatedPlatforms
-                localBotRef.current = botUpdatedPlatforms
+                rowRef.current = updatedPlatforms;
                 break;
             }
-        } // Update state with the new platformsw
-    }
-    else if(hdirection === 'B'){
-        for (let i = 0; i < botUpdatedPlatforms.length; i++) {
-            if (botUpdatedPlatforms[i].includes(playerId)) {
-                const index = botUpdatedPlatforms[i].indexOf(playerId);
-                const value = botUpdatedPlatforms[i].splice(index, 1)[0]; // Remove playerId
-                if (vdirection === 'L' && i > 0) {
-                    moveElement(playerId, i - 1, vdirection, hdirection, 'Back');
-                    botUpdatedPlatforms[i - 1].push(value); // Move left
-                    console.log(`${playerId} was shot L (${i} to ${i - 1})`);
-                } else if (vdirection === 'R' && i < botUpdatedPlatforms.length - 1) {
-                    moveElement(playerId, i + 1, vdirection, hdirection, 'Back');
-                    botUpdatedPlatforms[i + 1].unshift(value); // Move right
-                    console.log(`${playerId} was shot R (${i} to ${i + 1})`);
-                }
-                else{
-                    moveElement(playerId, i, vdirection, hdirection, 'FellBack');
-                    flipStatus(playerId);
-                    console.log(playerId, ' fell off the platforms');
-                }
-                localBotRef.current = topUpdatedPlatforms
-                localBotRef.current = botUpdatedPlatforms
-                break;
-            }
-        } // Update state with the new platformsw
-    }
-}, 950);
-}, []);
+        }, 950);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-    
     function findNearestPlayer(playerID, hdirection) {
-        let currentTopLocalSpawns = localTopRef.current;
-        let currentBotLocalSpawns = localBotRef.current;
-        const currentLocalDirections = localDirectionsRef.current;
-    
-        const directionEntry = Object.entries(currentLocalDirections).find(([key, value]) => value[0] === playerID);
-        const Direction = directionEntry ? directionEntry[1][1] : null; // Get the direction if available
-    
-        const element = document.getElementById(playerID);
-    
+        const entry = entryOf(playerID);
+        const Direction = entry ? entry[1] : null; // facing, if available
 
-    
-        let flattened = currentBotLocalSpawns.flat();
-        if(hdirection === 'T'){
-            flattened = currentTopLocalSpawns.flat();
-        }
-    
+        const element = document.getElementById(playerID);
+
+        const rows = hdirection === 'T' ? localTopRef.current : localBotRef.current;
+        const flattened = rows.flat();
+
         if (!flattened.includes(playerID)) {
             console.log('INVALID PLAYER ID');
             return;
         }
-    
+
         const targetIndex = flattened.indexOf(playerID);
         let nearestTarget = null;
         let nearestDistance = Infinity;
-    
+
         for (let i = 0; i < flattened.length; i++) {
             if (flattened[i] !== playerID) {
+                // Downed (or dying) players can't be hit; the shot passes
+                // over them to the next player in range
+                if (downedRef.current.has(flattened[i]) || deadNumericRef.current.has(flattened[i])) {
+                    continue;
+                }
                 const distance = Math.abs(i - targetIndex);
                 // Only consider players based on direction
                 if ((Direction === 'R' && i > targetIndex) || (Direction === 'L' && i < targetIndex)) {
@@ -696,201 +537,90 @@ const knockbackPlayer = useCallback((playerId, vdirection, hdirection) => {
                 }
             }
         }
-        localBotRef.current = currentBotLocalSpawns;
-        localTopRef.current = currentTopLocalSpawns;
+
         if (nearestTarget) {
             if (element) {
-                knockbackPlayer(nearestTarget, Direction, hdirection);  
-                element.src = CharShoot; // Ensure CharShoot is defined
-
+                dispatchGameEvent({ type: 'shot', actor: socketIdOf(playerID), target: socketIdOf(nearestTarget) });
+                knockbackPlayer(nearestTarget, Direction, hdirection, playerID);
+                element.src = skinOf(playerID).draw;
+                // Delayed so the bang lands with the draw animation's shot
+                // (knockback hits at ~950ms)
+                playSound(GunshotHitSfx, 0.8, 280);
             }
         } else {
-            console.log('NO NEAREST TARGET FOUND');
-            element.src = CharShoot;
+            dispatchGameEvent({ type: 'missed', actor: socketIdOf(playerID) });
+            if (element) element.src = skinOf(playerID).draw;
+            playSound(GunshotMissSfx, 0.8, 280);
         }
         setTimeout(() => {
-            element.src = CharIdle;
+            if (element) element.src = skinOf(playerID).idle;
         }, 1100);
-
     }
-    
 
-    
-    useEffect(() => {    
-        localBotRef.current = localSpawns;
+    // Refs get COPIES of the state (see handleSetSpawns): the simulation
+    // mutates the refs in place, and sharing objects with state would make
+    // the rendered tree shift under React mid-game
+    useEffect(() => {
+        localBotRef.current = copyRows(localSpawns);
     }, [localSpawns]);
-    
-    useEffect(() => {    
-        localDirectionsRef.current = localDirections;
-        console.log(localDirectionsRef.current)
+
+    useEffect(() => {
+        localDirectionsRef.current = Object.fromEntries(
+            Object.entries(localDirections || {}).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value])
+        );
     }, [localDirections]);
 
+    // Draw a character on its current platform. Facing and alive/dead status
+    // come from the directions entry matching the numeric id, so restored
+    // games render players where (and how) they actually are
+    const renderCharacter = (pid) => {
+        // Skin comes from this state entry directly — skinOf reads the ref,
+        // which isn't synced yet during the game-start render
+        const entry = Object.values(localDirections || {}).find((value) => Array.isArray(value) && value[0] === pid);
+        if (!entry || entry[3] === 'D') return null;
+        const FacingLeft = entry[1] === 'L';
+        return (
+            <img
+                key={pid}
+                id={pid}
+                src={skinFromEntry(entry, pid).idle}
+                alt="Character"
+                crossOrigin="anonymous"
+                style={{
+                    width: '20%',
+                    objectFit: 'contain',
+                    imageRendering: 'pixelated',
+                    transform: FacingLeft ? 'scaleX(-1)' : 'scaleX(1)',
+                }}
+                className={`place-self-end character`}
+            />
+        );
+    };
 
-    const style = {
+    // One row of platforms; the bottom row gets the train artwork, the top
+    // row (the roofs) is only occupied via Climb or a restored game
+    const renderPlatformRow = (idPrefix, occupantsAt, withImage) => (
+        <div className={ROW_CLASS} style={{ width: '100vw' }}>
+            {localSpawns.map((spawn, index) => (
+                <div key={index} id={idPrefix + index} className={PLATFORM_CLASS}
+                    style={{
+                        ...(withImage ? { backgroundImage: `url(${PLATFORM_IMAGES[index % PLATFORM_IMAGES.length]})` } : {}),
+                        backgroundSize: 'contain',
+                        backgroundPosition: 'center bottom',
+                        imageRendering: 'pixelated',
+                    }}>
+                    {(occupantsAt(index) || []).map(renderCharacter)}
+                </div>
+            ))}
+        </div>
+    );
 
-};
     return (
-    <div className='flex flex-col place-items-end justify-center items-stretch top-0'>
-    <div className='flex flex-row place-items-end justify-center items-stretch top-0'
-    style={{width: '100vw'}}>
-        {/* Creating multiple divs */}
-        {localSpawns.map((spawn, index) => {   
-            let rndtrain;
-        let rndplatform;
-        const platformIndex = index % 3 + 1; 
-        switch (platformIndex) {
-            case 1:
-                rndplatform = platform1;
-                break;
-            case 2:
-                rndplatform = platform2;
-                break;
-            case 3:
-                rndplatform = platform3;
-                break;
-            default:
-                rndplatform = platform1;
-                break
-        }
-
-            if (spawn > 0) {
-                const keys = Object.keys(localDirections);
-                const direction = localDirections[keys[index - 1]];
-
-                // Check if direction is not null
-                if (direction) {
-                    const FacingLeft = direction[1] === 'L';
-                    const PlayerID = direction[0];
-                    return (
-                        <div key={index} id={'tp'+index} className={`grow flex place-items-end justify-center platforms `}
-                        style={{ 
-                        backgroundSize: 'contain',
-                        backgroundPosition: 'center bottom',
-                        imageRendering: 'pixelated',
-                        ...style
-                        }}>
-                        </div>
-                    );
-                }
-            } else {         
-                return (
-                    <div key={index} id={'tp'+index} className={`grow flex place-items-end justify-center unselectable platforms`}
-                    style={{ 
-                    backgroundSize: 'contain',
-                    backgroundPosition: 'center bottom',
-                    imageRendering: 'pixelated',
-                    ...style
-                    }}> 
-        
-                    </div>
-                );
-            }
-})}
-
+        <div className={`flex flex-col place-items-end justify-center items-stretch top-0 border-b-8 border-stone-800 ${localSpawns.length > 0 ? '' : 'hidden'}`}>
+            {renderPlatformRow('tp', (index) => localTopSpawns[index], false)}
+            {renderPlatformRow('bp', (index) => (Array.isArray(localSpawns[index]) ? localSpawns[index] : []), true)}
         </div>
-    <div className='flex flex-row place-items-end justify-center items-stretch top-0'
-    style={{width: '100vw'}}>
-        {/* Creating multiple divs */}
-        {localSpawns.map((spawn, index) => {   let rndtrain;
-        let rndplatform;
-        const platformIndex = index % 3 + 1; 
-        switch (platformIndex) {
-            case 1:
-                rndplatform = platform1;
-                break;
-            case 2:
-                rndplatform = platform2;
-                break;
-            case 3:
-                rndplatform = platform3;
-                break;
-            default:
-                rndplatform = platform1;
-                break
-        }
-
-            if (spawn > 0) {
-                const keys = Object.keys(localDirections);
-                const direction = localDirections[keys[index - 1]];
-
-                // Check if direction is not null
-                if (direction) {
-                    const FacingLeft = direction[1] === 'L';
-                    const PlayerID = direction[0];
-                    return (
-                        <div key={index} id={'bp'+index} className={`grow flex place-items-end justify-center unselectable platforms `}
-                        style={{backgroundImage: `url(${rndplatform})`, 
-                        backgroundSize: 'contain',
-                        backgroundPosition: 'center bottom',
-                        imageRendering: 'pixelated',
-                        ...style
-                        }}>
-                            <img 
-                                id={PlayerID} 
-                                src={CharIdle} 
-                                alt="Character" 
-                                crossOrigin="anonymous" 
-                                style={{ 
-                                    width: '20%', 
-                                    objectFit: 'contain',
-                                    imageRendering: 'pixelated',
-                                    transform: FacingLeft ? 'scaleX(-1)' : 'scaleX(1)',
-                                    filter: PlayerID===1 ? `hue-rotate(0deg)` : `hue-rotate(${PlayerID*60}deg)`,
-                                }} 
-                                className={`place-self-end character`}
-                                //className={`place-self-end ${isMoving ? 'moving' : ''}`}
-                            />
-                        </div>
-                    );
-                }
-            } else {         
-                return (
-                    <div key={index} id={'bp'+index} className={`grow flex place-items-end justify-center unselectable platforms`}
-                    style={{backgroundImage: `url(${rndplatform})`, 
-                    backgroundSize: 'contain',
-                    backgroundPosition: 'center bottom',
-                    imageRendering: 'pixelated',
-                    ...style
-                    }}> 
-        
-                    </div>
-                );
-            }
-})}
-
-        </div>
-        {/*<div className='flex flex-row place-items-end justify-center items-stretch top-0'>
-        {localSpawns.map((spawn, index) => {
-                    let rndplatform;
-                    const platformIndex = index % 3 + 1; 
-                    switch (platformIndex) {
-                        case 2:
-                            rndplatform = platform1;
-                            break;
-                        case 3:
-                            rndplatform = platform2;
-                            break;
-                        case 1:
-                            rndplatform = platform3;
-                            break;
-                        default:
-                            rndplatform = platform1;
-                            break
-                    }
-            return(
-                <div key={index} id={'p'+index} className={`grow flex place-items-end justify-center character platforms`}
-                        style={{backgroundImage: `url(${rndplatform})`, 
-                        backgroundSize: 'contain',
-                        backgroundPosition: 'center bottom',
-                        imageRendering: 'pixelated',
-                        ...style
-                        }}>
-                        </div>
-            )
-        })}
-        </div>*/}
-    </div>
-    ); // No UI needed for this component
+    );
 }
 
 export default GameLogic;
